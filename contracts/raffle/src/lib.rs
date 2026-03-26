@@ -56,7 +56,7 @@ fn require_factory_admin(env: &Env) -> Result<Address, ContractError> {
 fn require_factory_not_paused(env: &Env) -> Result<(), ContractError> {
     if env
         .storage()
-        .persistent()
+        .instance()
         .get(&DataKey::Paused)
         .unwrap_or(false)
     {
@@ -184,7 +184,7 @@ impl RaffleFactory {
 
     pub fn pause(env: Env) -> Result<(), ContractError> {
         let admin = require_factory_admin(&env)?;
-        env.storage().persistent().set(&DataKey::Paused, &true);
+        env.storage().instance().set(&DataKey::Paused, &true);
 
         publish_factory_event(
             &env,
@@ -200,7 +200,7 @@ impl RaffleFactory {
 
     pub fn unpause(env: Env) -> Result<(), ContractError> {
         let admin = require_factory_admin(&env)?;
-        env.storage().persistent().set(&DataKey::Paused, &false);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         publish_factory_event(
             &env,
@@ -216,7 +216,7 @@ impl RaffleFactory {
 
     pub fn is_paused(env: Env) -> bool {
         env.storage()
-            .persistent()
+            .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false)
     }
