@@ -106,6 +106,8 @@ pub enum DataKey {
     NextTicketId,
     Factory,
     RefundStatus(u32), // ticket_id -> bool
+    Admin,
+    Paused,
 }
 
 // --- Error Types ---
@@ -133,6 +135,8 @@ pub enum Error {
     AlreadyInitialized = 18,
     NotInitialized = 19,
     InvalidStateTransition = 20,
+    AdminTransferPending = 21,
+    NoPendingTransfer = 22,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -187,11 +191,34 @@ fn write_ticket(env: &Env, ticket: &Ticket) {
         .set(&DataKey::Ticket(ticket.id), ticket);
 }
 
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::NotAuthorized)?;
+    admin.require_auth();
+    Ok(admin)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(Error::ContractPaused);
+    }
+    Ok(())
+}
+
 #[contractimpl]
 impl Contract {
     pub fn init(
         env: Env,
         factory: Address,
+        admin: Address,
         creator: Address,
         config: RaffleConfig,
     ) -> Result<(), Error> {
@@ -238,6 +265,7 @@ impl Contract {
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
+        env.storage().instance().set(&DataKey::Admin, &admin);
 
         publish_event(
             &env,
