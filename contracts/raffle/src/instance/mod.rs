@@ -625,13 +625,11 @@ impl Contract {
         // Admin or Creator can cancel
         match reason {
             CancelReason::CreatorCancelled => raffle.creator.require_auth(),
-            CancelReason::AdminCancelled | CancelReason::OracleTimeout | CancelReason::MinTicketsNotMet => {
-                let _factory: Address = env.storage().instance().get(&DataKey::Factory).unwrap();
-                if reason == CancelReason::AdminCancelled {
-                    raffle.creator.require_auth();
-                } else {
-                    raffle.creator.require_auth();
-                }
+            CancelReason::AdminCancelled => {
+                require_admin(&env)?;
+            }
+            CancelReason::OracleTimeout | CancelReason::MinTicketsNotMet => {
+                require_admin(&env)?;
             }
         }
 
@@ -776,6 +774,16 @@ impl Contract {
             .unwrap_or(false)
     }
 
+    pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let factory: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Factory)
+            .ok_or(Error::NotAuthorized)?;
+        factory.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

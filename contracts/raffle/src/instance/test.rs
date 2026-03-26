@@ -647,3 +647,34 @@ fn test_unpause_restores_buy_ticket() {
     assert_eq!(tickets_sold, 1);
 }
 
+// --- SET_ADMIN TESTS ---
+
+#[test]
+fn test_set_admin_by_factory() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, factory, _) =
+        setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
+
+    let new_admin = Address::generate(&env);
+
+    env.as_contract(&factory, || {
+        client.set_admin(&new_admin);
+    });
+}
+
+#[test]
+#[should_panic]
+fn test_set_admin_rejected_from_non_factory() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _) =
+        setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
+
+    let stranger = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    env.as_contract(&stranger, || {
+        client.set_admin(&new_admin);
+    });
+}
