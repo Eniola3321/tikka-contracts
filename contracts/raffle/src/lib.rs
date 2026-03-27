@@ -6,6 +6,8 @@ use soroban_sdk::{
 
 mod events;
 mod instance;
+pub mod types;
+pub use types::{PaginationParams, PageResult_Raffles, PageResult_Tickets, effective_limit};
 use instance::{RaffleConfig, RandomnessSource};
 
 #[contract]
@@ -21,6 +23,8 @@ pub enum DataKey {
     Treasury,
     Paused,
     PendingAdmin,
+    UniqueParticipant(Address),
+    TotalUniqueParticipants,
 }
 
 #[contracterror]
@@ -199,6 +203,35 @@ impl RaffleFactory {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    pub fn get_raffles_page(env: Env, params: PaginationParams) -> PageResult_Raffles {
+        let all: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RaffleInstances)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let total = all.len();
+        let lim = effective_limit(params.limit);
+        let offset = params.offset;
+
+        if offset >= total {
+            return PageResult_Raffles {
+                items: Vec::new(&env),
+                total,
+                has_more: false,
+            };
+        }
+
+        let end = (offset + lim).min(total);
+        let mut items = Vec::new(&env);
+        for i in offset..end {
+            items.push_back(all.get(i).unwrap());
+        }
+
+        let has_more = (offset + items.len()) < total;
+        PageResult_Raffles { items, total, has_more }
+    }
+
     pub fn pause(env: Env) -> Result<(), ContractError> {
         let admin = require_factory_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &true);
@@ -313,5 +346,31 @@ impl RaffleFactory {
         let instance_client = instance::ContractClient::new(&env, &instance_address);
         instance_client.unpause();
         Ok(())
+    }
+
+    pub fn track_participant(env: Env, participant: Address) -> Result<(), ContractError> {
+        participant.require_auth();
+
+        let key = DataKey::UniqueParticipant(participant.clone());
+        if !env.storage().persistent().has(&key) {
+            env.storage().persistent().set(&key, &true);
+            let mut count: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::TotalUniqueParticipants)
+                .unwrap_or(0);
+            count += 1;
+            env.storage()
+                .persistent()
+                .set(&DataKey::TotalUniqueParticipants, &count);
+        }
+        Ok(())
+    }
+
+    pub fn get_unique_participants(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TotalUniqueParticipants)
+            .unwrap_or(0)
     }
 }

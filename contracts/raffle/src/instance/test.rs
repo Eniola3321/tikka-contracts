@@ -677,7 +677,69 @@ fn test_claim_with_protocol_fee_guard_released() {
     assert_eq!(token_client.balance(&treasury), 5i128);
 }
 
-// --- 6. CEI PATTERN VALIDATION TESTS ---
+// --- 6. GLOBAL PROTOCOL ANALYTICS TESTS ---
+
+fn setup_factory(env: &Env) -> (RaffleFactoryClient<'_>, Address) {
+    let admin = Address::generate(env);
+    let treasury = Address::generate(env);
+    let factory_id = env.register(RaffleFactory, ());
+    let factory_client = RaffleFactoryClient::new(env, &factory_id);
+
+    // Register a dummy wasm hash (32 zero bytes) – factory init needs it
+    let wasm_hash = soroban_sdk::BytesN::from_array(env, &[0u8; 32]);
+    factory_client.init_factory(&admin, &wasm_hash, &0u32, &treasury);
+
+    (factory_client, admin)
+}
+
+#[test]
+fn test_track_participant_increments_counter() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (factory, _admin) = setup_factory(&env);
+
+    assert_eq!(factory.get_unique_participants(), 0u32);
+
+    let alice = Address::generate(&env);
+    factory.track_participant(&alice);
+
+    assert_eq!(factory.get_unique_participants(), 1u32);
+}
+
+#[test]
+fn test_track_participant_idempotent_for_same_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (factory, _admin) = setup_factory(&env);
+
+    let alice = Address::generate(&env);
+    factory.track_participant(&alice);
+    factory.track_participant(&alice); // second call must NOT increment
+    factory.track_participant(&alice); // third call also a no-op
+
+    assert_eq!(factory.get_unique_participants(), 1u32);
+}
+
+#[test]
+fn test_track_multiple_unique_participants() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (factory, _admin) = setup_factory(&env);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    factory.track_participant(&alice);
+    factory.track_participant(&bob);
+    factory.track_participant(&carol);
+    // alice again – must remain 3
+    factory.track_participant(&alice);
+
+    assert_eq!(factory.get_unique_participants(), 3u32);
+}
+
+// --- 7. CEI PATTERN VALIDATION TESTS ---
 
 #[test]
 fn test_deposit_prize_cei_state_active_after_call() {
