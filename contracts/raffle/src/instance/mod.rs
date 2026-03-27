@@ -57,6 +57,8 @@ pub struct Raffle {
     pub oracle_address: Option<Address>,
     pub protocol_fee_bp: u32,
     pub treasury_address: Option<Address>,
+    pub swap_router: Option<Address>,
+    pub tikka_token: Option<Address>,
 }
 
 #[derive(Clone)]
@@ -73,6 +75,8 @@ pub struct RaffleConfig {
     pub oracle_address: Option<Address>,
     pub protocol_fee_bp: u32,
     pub treasury_address: Option<Address>,
+    pub swap_router: Option<Address>,
+    pub tikka_token: Option<Address>,
 }
 
 #[derive(Clone)]
@@ -202,6 +206,18 @@ fn release_guard(env: &Env) {
     env.storage().instance().remove(&DataKey::ReentrancyGuard);
 }
 
+#[soroban_sdk::contractclient(name = "SoroswapRouterClient")]
+pub trait SoroswapRouterTrait {
+    fn swap_exact_tokens_for_tokens(
+        env: Env,
+        amount_in: i128,
+        amount_out_min: i128,
+        path: Vec<Address>,
+        to: Address,
+        deadline: u64,
+    ) -> i128;
+}
+
 #[contractimpl]
 impl Contract {
     pub fn init(
@@ -251,6 +267,8 @@ impl Contract {
             oracle_address: config.oracle_address,
             protocol_fee_bp: config.protocol_fee_bp,
             treasury_address: config.treasury_address,
+            swap_router: config.swap_router,
+            tikka_token: config.tikka_token,
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
@@ -583,12 +601,67 @@ impl Contract {
 
         token_client.transfer(&contract_address, &winner, &net_amount);
 
-        if platform_fee > 0 && raffle.treasury_address.is_some() {
-            token_client.transfer(
-                &contract_address,
-                &raffle.treasury_address.clone().unwrap(),
-                &platform_fee,
-            );
+        if platform_fee > 0 {
+            if let (Some(router), Some(tikka)) = (&raffle.swap_router, &raffle.tikka_token) {
+                if raffle.payment_token != *tikka {
+                    // Approve router
+                    token_client.approve(
+                        &contract_address,
+                        router,
+                        &platform_fee,
+                        &(env.ledger().sequence() + 100),
+                    );
+
+                    let mut path = Vec::new(&env);
+                    path.push_back(raffle.payment_token.clone());
+                    path.push_back(tikka.clone());
+
+                    let router_client = SoroswapRouterClient::new(&env, router);
+                    let amount_out = router_client.swap_exact_tokens_for_tokens(
+                        &platform_fee,
+                        &0i128,
+                        &path,
+                        &contract_address,
+                        &(env.ledger().timestamp() + 300),
+                    );
+
+                    let tikka_client = token::Client::new(&env, tikka);
+                    tikka_client.burn(&contract_address, &amount_out);
+
+                    publish_event(
+                        &env,
+                        "buyback_and_burn_executed",
+                        crate::events::BuybackAndBurnExecuted {
+                            router: router.clone(),
+                            tikka_token: tikka.clone(),
+                            amount_in: platform_fee,
+                            amount_out,
+                            timestamp: env.ledger().timestamp(),
+                        },
+                    );
+                } else {
+                    let tikka_client = token::Client::new(&env, tikka);
+                    tikka_client.burn(&contract_address, &platform_fee);
+
+                    publish_event(
+                        &env,
+                        "buyback_and_burn_executed",
+                        crate::events::BuybackAndBurnExecuted {
+                            router: contract_address.clone(),
+                            tikka_token: tikka.clone(),
+                            amount_in: platform_fee,
+                            amount_out: platform_fee,
+                            timestamp: env.ledger().timestamp(),
+                        },
+                    );
+                }
+            } else if raffle.treasury_address.is_some() {
+                token_client.transfer(
+                    &contract_address,
+                    &raffle.treasury_address.clone().unwrap(),
+                    &platform_fee,
+                );
+            }
         }
 
         release_guard(&env);
