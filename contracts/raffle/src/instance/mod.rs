@@ -120,28 +120,41 @@ pub enum DataKey {
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum Error {
+    // General errors (1-10)
     RaffleNotFound = 1,
     RaffleInactive = 2,
     TicketsSoldOut = 3,
-    InsufficientPayment = 4,
+    InsufficientFunds = 4,
     NotAuthorized = 5,
-    PrizeNotDeposited = 6,
-    PrizeAlreadyClaimed = 7,
-    InvalidParameters = 8,
-    ContractPaused = 9,
-    InsufficientTickets = 10,
-    RaffleEnded = 11,
-    RaffleStillRunning = 12,
-    NoTicketsSold = 13,
-    MultipleTicketsNotAllowed = 14,
-    PrizeAlreadyDeposited = 15,
-    NotWinner = 16,
-    ArithmeticOverflow = 17,
-    AlreadyInitialized = 18,
-    NotInitialized = 19,
-    InvalidStateTransition = 20,
-    Reentrancy = 21,
-    ClaimTooEarly = 22,
+    
+    // Prize/Claim errors (11-20)
+    PrizeNotDeposited = 11,
+    PrizeAlreadyClaimed = 12,
+    PrizeAlreadyDeposited = 13,
+    NotWinner = 14,
+    ClaimTooEarly = 15,
+    
+    // State/Validation errors (21-30)
+    InvalidParameters = 21,
+    InvalidStatus = 22,
+    ContractPaused = 23,
+    InvalidStateTransition = 24,
+    RaffleExpired = 25,
+    
+    // Ticket errors (31-40)
+    InsufficientTickets = 31,
+    MultipleTicketsNotAllowed = 32,
+    NoTicketsSold = 33,
+    TicketNotFound = 34,
+    
+    // System errors (41-50)
+    ArithmeticOverflow = 41,
+    AlreadyInitialized = 42,
+    NotInitialized = 43,
+    Reentrancy = 44,
+    // Admin errors (51-60)
+    AdminTransferPending = 51,
+    NoPendingTransfer = 52,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -155,7 +168,14 @@ fn write_raffle(env: &Env, raffle: &Raffle) {
     env.storage().instance().set(&DataKey::Raffle, raffle);
 }
 
-fn read_tickets(env: &Env) -> Vec<Ticket> {
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    if Contract::is_paused(env.clone()) {
+        return Err(Error::ContractPaused);
+    }
+    Ok(())
+}
+
+fn read_tickets(env: &Env) -> Vec<Address> {
     env.storage()
         .instance()
         .get(&DataKey::Tickets)
@@ -485,7 +505,7 @@ impl Contract {
             let oracle = raffle
                 .oracle_address
                 .as_ref()
-                .expect("Oracle missing")
+                .ok_or(Error::InvalidParameters)?
                 .clone();
             publish_event(
                 &env,
@@ -567,7 +587,7 @@ impl Contract {
             &env,
             "randomness_received",
             RandomnessReceived {
-                oracle: raffle.oracle_address.clone().unwrap(),
+                oracle: raffle.oracle_address.clone().ok_or(Error::InvalidParameters)?,
                 seed: random_seed,
                 timestamp: env.ledger().timestamp(),
             },
