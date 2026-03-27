@@ -106,6 +106,8 @@ pub enum DataKey {
     NextTicketId,
     Factory,
     RefundStatus(u32), // ticket_id -> bool
+    Admin,
+    Paused,
 }
 
 // --- Error Types ---
@@ -133,6 +135,8 @@ pub enum Error {
     AlreadyInitialized = 18,
     NotInitialized = 19,
     InvalidStateTransition = 20,
+    AdminTransferPending = 21,
+    NoPendingTransfer = 22,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -187,11 +191,34 @@ fn write_ticket(env: &Env, ticket: &Ticket) {
         .set(&DataKey::Ticket(ticket.id), ticket);
 }
 
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::NotAuthorized)?;
+    admin.require_auth();
+    Ok(admin)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(Error::ContractPaused);
+    }
+    Ok(())
+}
+
 #[contractimpl]
 impl Contract {
     pub fn init(
         env: Env,
         factory: Address,
+        admin: Address,
         creator: Address,
         config: RaffleConfig,
     ) -> Result<(), Error> {
@@ -238,6 +265,7 @@ impl Contract {
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
+        env.storage().instance().set(&DataKey::Admin, &admin);
 
         publish_event(
             &env,
@@ -258,6 +286,7 @@ impl Contract {
     }
 
     pub fn deposit_prize(env: Env) -> Result<(), Error> {
+        require_not_paused(&env)?;
         let mut raffle = read_raffle(&env)?;
         raffle.creator.require_auth();
 
@@ -302,6 +331,7 @@ impl Contract {
 
     pub fn buy_ticket(env: Env, buyer: Address) -> Result<u32, Error> {
         buyer.require_auth();
+        require_not_paused(&env)?;
         let mut raffle = read_raffle(&env)?;
 
         if raffle.status != RaffleStatus::Active {
@@ -595,13 +625,11 @@ impl Contract {
         // Admin or Creator can cancel
         match reason {
             CancelReason::CreatorCancelled => raffle.creator.require_auth(),
-            CancelReason::AdminCancelled | CancelReason::OracleTimeout | CancelReason::MinTicketsNotMet => {
-                let _factory: Address = env.storage().instance().get(&DataKey::Factory).unwrap();
-                if reason == CancelReason::AdminCancelled {
-                    raffle.creator.require_auth(); 
-                } else {
-                    raffle.creator.require_auth();
-                }
+            CancelReason::AdminCancelled => {
+                require_admin(&env)?;
+            }
+            CancelReason::OracleTimeout | CancelReason::MinTicketsNotMet => {
+                require_admin(&env)?;
             }
         }
 
@@ -695,6 +723,66 @@ impl Contract {
 
     pub fn get_raffle(env: Env) -> Result<Raffle, Error> {
         read_raffle(&env)
+    }
+
+    pub fn pause(env: Env) -> Result<(), Error> {
+        let factory: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Factory)
+            .ok_or(Error::NotAuthorized)?;
+        factory.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &true);
+
+        publish_event(
+            &env,
+            "contract_paused",
+            crate::events::ContractPaused {
+                paused_by: factory,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
+        Ok(())
+    }
+
+    pub fn unpause(env: Env) -> Result<(), Error> {
+        let factory: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Factory)
+            .ok_or(Error::NotAuthorized)?;
+        factory.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &false);
+
+        publish_event(
+            &env,
+            "contract_unpaused",
+            crate::events::ContractUnpaused {
+                unpaused_by: factory,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let factory: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Factory)
+            .ok_or(Error::NotAuthorized)?;
+        factory.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        Ok(())
     }
 }
 
