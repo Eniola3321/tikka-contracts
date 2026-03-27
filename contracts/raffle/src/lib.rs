@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, xdr::ToXdr, Address, Bytes, Env, String,
+    contract, contracterror, contractimpl, contracttype, xdr::ToXdr, Address, Env, IntoVal, String,
     Symbol, Vec,
 };
 
@@ -70,7 +70,7 @@ impl RaffleFactory {
     pub fn init_factory(
         env: Env,
         admin: Address,
-        wasm_hash: Bytes,
+        wasm_hash: soroban_sdk::BytesN<32>,
         protocol_fee_bp: u32,
         treasury: Address,
     ) -> Result<(), ContractError> {
@@ -93,7 +93,11 @@ impl RaffleFactory {
         Ok(())
     }
 
-    pub fn set_config(env: Env, protocol_fee_bp: u32, treasury: Address) -> Result<(), ContractError> {
+    pub fn set_config(
+        env: Env,
+        protocol_fee_bp: u32,
+        treasury: Address,
+    ) -> Result<(), ContractError> {
         require_factory_admin(&env)?;
         env.storage()
             .persistent()
@@ -120,7 +124,7 @@ impl RaffleFactory {
         creator.require_auth();
         require_factory_not_paused(&env)?;
 
-        let _wasm_hash: Bytes = env
+        let wasm_hash: soroban_sdk::BytesN<32> = env
             .storage()
             .persistent()
             .get(&DataKey::InstanceWasmHash)
@@ -133,20 +137,23 @@ impl RaffleFactory {
             .unwrap_or(0);
         let treasury: Address = env.storage().persistent().get(&DataKey::Treasury).unwrap();
 
-        let mut _salt_src = Vec::new(&env);
-        _salt_src.push_back(creator.clone());
-        let _salt = env.crypto().sha256(&creator.clone().to_xdr(&env));
-
-        // Deployment logic placeholder
-
         let mut instances: Vec<Address> = env
             .storage()
             .persistent()
             .get(&DataKey::RaffleInstances)
             .unwrap();
 
-        // Use parameters to avoid warnings
-        let _ = RaffleConfig {
+        let mut salt_src = Vec::new(&env);
+        salt_src.push_back(creator.to_val());
+        salt_src.push_back(instances.len().into_val(&env));
+        let salt = env.crypto().sha256(&salt_src.to_xdr(&env));
+
+        let raffle_address = env
+            .deployer()
+            .with_current_contract(salt)
+            .deploy_v2(wasm_hash, ());
+
+        let config = RaffleConfig {
             description,
             end_time,
             max_tickets,
@@ -160,12 +167,17 @@ impl RaffleFactory {
             treasury_address: Some(treasury),
         };
 
-        instances.push_back(creator.clone());
+        let admin: Address = env.storage().persistent().get(&DataKey::Admin).unwrap();
+        let factory_address = env.current_contract_address();
+        let client = instance::ContractClient::new(&env, &raffle_address);
+        client.init(&factory_address, &admin, &creator, &config);
+
+        instances.push_back(raffle_address.clone());
         env.storage()
             .persistent()
             .set(&DataKey::RaffleInstances, &instances);
 
-        Ok(creator)
+        Ok(raffle_address)
     }
 
     pub fn get_admin(env: Env) -> Result<Address, ContractError> {

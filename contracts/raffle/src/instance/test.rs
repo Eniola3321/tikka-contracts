@@ -1,11 +1,11 @@
 #![cfg(test)]
 
 use super::*;
+use crate::{ContractError, RaffleFactory, RaffleFactoryClient};
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
     token, Address, Bytes, Env, IntoVal, String, Symbol,
 };
-use crate::{RaffleFactory, RaffleFactoryClient, ContractError};
 
 /// HELPER: Standardized environment setup
 fn setup_raffle_env(
@@ -256,7 +256,7 @@ fn test_raffle_created_event() {
 fn test_prize_deposited_event() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, _, _, _) = setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
+    let (client, _, _, _, _, _) = setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
 
@@ -518,7 +518,7 @@ fn test_double_refund_rejected() {
 fn test_claim_prize_guard_released_after_success() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, _, admin_client, _) =
+    let (client, _, _, admin_client, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
@@ -545,7 +545,7 @@ fn test_claim_prize_guard_released_after_success() {
 fn test_refund_guard_released_after_success() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, buyer, _, _) =
+    let (client, _, buyer, _, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
@@ -566,7 +566,7 @@ fn test_refund_guard_released_after_success() {
 fn test_sequential_refunds_succeed_guard_properly_released() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, buyer, admin_client, _) =
+    let (client, _, buyer, admin_client, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
     let token_client = token::Client::new(&env, &admin_client.address);
 
@@ -596,7 +596,7 @@ fn test_sequential_refunds_succeed_guard_properly_released() {
 fn test_claim_prize_blocked_by_active_reentrancy_guard() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, _, admin_client, _) =
+    let (client, _, _, admin_client, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
@@ -624,7 +624,7 @@ fn test_claim_prize_blocked_by_active_reentrancy_guard() {
 fn test_refund_blocked_by_active_reentrancy_guard() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, buyer, _, _) =
+    let (client, _, buyer, _, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
@@ -646,7 +646,7 @@ fn test_claim_with_protocol_fee_guard_released() {
     let env = Env::default();
     env.mock_all_auths();
     let treasury = Address::generate(&env);
-    let (client, _, _, admin_client, _) = setup_raffle_env(
+    let (client, _, _, admin_client, _, _) = setup_raffle_env(
         &env,
         RandomnessSource::Internal,
         None,
@@ -683,8 +683,7 @@ fn test_claim_with_protocol_fee_guard_released() {
 fn test_deposit_prize_cei_state_active_after_call() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, _, _, _) =
-        setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
+    let (client, _, _, _, _, _) = setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
 
@@ -697,7 +696,7 @@ fn test_deposit_prize_cei_state_active_after_call() {
 fn test_buy_ticket_cei_state_incremented_correctly() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, _, admin_client, _) =
+    let (client, _, _, admin_client, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
@@ -723,7 +722,7 @@ fn test_buy_ticket_cei_state_incremented_correctly() {
 fn test_claim_prize_cei_status_transitions_to_claimed() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, _, admin_client, _) =
+    let (client, _, _, admin_client, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
@@ -750,7 +749,7 @@ fn test_claim_prize_cei_status_transitions_to_claimed() {
 fn test_double_claim_rejected_after_cei_state_transition() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _, _, admin_client, _) =
+    let (client, _, _, admin_client, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
     client.deposit_prize();
@@ -771,7 +770,7 @@ fn test_double_claim_rejected_after_cei_state_transition() {
 fn test_cancel_raffle_cei_state_cancelled_before_refund() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, creator, buyer, admin_client, _) =
+    let (client, creator, buyer, admin_client, _, _) =
         setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
     let token_client = token::Client::new(&env, &admin_client.address);
 
