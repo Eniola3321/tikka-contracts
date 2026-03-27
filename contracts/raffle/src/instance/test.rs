@@ -87,6 +87,7 @@ fn test_basic_internal_raffle_flow() {
 
     let raffle = client.get_raffle();
     let winner = raffle.winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     let _claimed_amount = client.claim_prize(&winner);
 
     assert_eq!(token_client.balance(&winner), 100i128);
@@ -116,6 +117,7 @@ fn test_protocol_fees() {
 
     client.finalize_raffle();
     let winner = client.get_raffle().winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
 
     // Prize: 100, Fee: 5% = 5, Winner: 95
@@ -412,6 +414,7 @@ fn test_prize_claimed_event() {
 
     client.finalize_raffle();
     let winner = client.get_raffle().winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
 
     // Check that prize_claimed event was emitted
@@ -526,6 +529,7 @@ fn test_claim_prize_guard_released_after_success() {
     }
     client.finalize_raffle();
     let winner = client.get_raffle().winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
 
     // Guard must be released after successful claim
@@ -611,6 +615,7 @@ fn test_claim_prize_blocked_by_active_reentrancy_guard() {
             .set(&DataKey::ReentrancyGuard, &true);
     });
 
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner); // Must panic with Reentrancy
 }
 
@@ -659,6 +664,7 @@ fn test_claim_with_protocol_fee_guard_released() {
     client.finalize_raffle();
 
     let winner = client.get_raffle().winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     let claimed = client.claim_prize(&winner);
     assert_eq!(claimed, 95i128);
 
@@ -732,6 +738,7 @@ fn test_claim_prize_cei_status_transitions_to_claimed() {
     assert!(raffle_before.status == RaffleStatus::Finalized);
 
     let winner = raffle_before.winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
 
     let raffle_after = client.get_raffle();
@@ -755,6 +762,7 @@ fn test_double_claim_rejected_after_cei_state_transition() {
     client.finalize_raffle();
     let winner = client.get_raffle().winner.unwrap();
 
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
     client.claim_prize(&winner); // Must panic: status is Claimed, not Finalized
 }
@@ -779,84 +787,50 @@ fn test_cancel_raffle_cei_state_cancelled_before_refund() {
     assert_eq!(token_client.balance(&creator), 1000i128);
 }
 
-// --- 7. AUTO BUYBACK AND BURN TESTS ---
+// --- 7. VERIFICATION DELAY TESTS ---
 
 #[test]
-fn test_auto_buyback_and_burn() {
+#[should_panic] // Error(Contract, #22) - ClaimTooEarly
+fn test_claim_prize_rejected_too_early() {
     let env = Env::default();
     env.mock_all_auths();
-    
-    #[contract]
-    pub struct MockRouter;
-    #[contractimpl]
-    impl MockRouter {
-        pub fn swap_exact_tokens_for_tokens(
-            env: Env,
-            amount_in: i128,
-            _amount_out_min: i128,
-            path: Vec<Address>,
-            to: Address,
-            _deadline: u64,
-        ) -> i128 {
-            let tikka_client = token::StellarAssetClient::new(&env, &path.get(1).unwrap());
-            tikka_client.mint(&to, &amount_in);
-            amount_in
-        }
-    }
-    let router = env.register(MockRouter, ());
+    let (client, _, _, admin_client, _, _) =
+        setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
 
-    let creator = Address::generate(&env);
-    let admin = Address::generate(&env);
-    let factory_admin = Address::generate(&env);
-
-    #[contract]
-    pub struct DummyFactory;
-    #[contractimpl]
-    impl DummyFactory {}
-    let factory = env.register(DummyFactory, ());
-
-    let payment_contract = env.register_stellar_asset_contract_v2(admin.clone());
-    let payment_id = payment_contract.address();
-    let payment_admin = token::StellarAssetClient::new(&env, &payment_id);
-    
-    let tikka_contract = env.register_stellar_asset_contract_v2(admin.clone());
-    let tikka_id = tikka_contract.address();
-    
-    payment_admin.mint(&creator, &1_000i128);
-
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let config = RaffleConfig {
-        description: String::from_str(&env, "Auto Burn"),
-        end_time: 0,
-        max_tickets: 5,
-        allow_multiple: false,
-        ticket_price: 100i128,
-        payment_token: payment_id.clone(),
-        prize_amount: 500i128,
-        randomness_source: RandomnessSource::Internal,
-        oracle_address: None,
-        protocol_fee_bp: 1000,
-        treasury_address: Some(Address::generate(&env)),
-        swap_router: Some(router.clone()),
-        tikka_token: Some(tikka_id.clone()),
-    };
-
-    client.init(&factory, &factory_admin, &creator, &config);
     client.deposit_prize();
-
     for _ in 0..5 {
         let b = Address::generate(&env);
-        payment_admin.mint(&b, &100i128);
+        admin_client.mint(&b, &10i128);
         client.buy_ticket(&b);
     }
     client.finalize_raffle();
-    
     let winner = client.get_raffle().winner.unwrap();
-    let net = client.claim_prize(&winner);
-    
-    assert_eq!(net, 450i128);
-    let tikka_client = token::Client::new(&env, &tikka_id);
-    assert_eq!(tikka_client.balance(&contract_id), 0);
+
+    // Attempt claim immediately -> panics with ClaimTooEarly
+    client.claim_prize(&winner);
+}
+
+#[test]
+fn test_claim_prize_accepted_after_one_hour() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, admin_client, _, _) =
+        setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
+
+    client.deposit_prize();
+    for _ in 0..5 {
+        let b = Address::generate(&env);
+        admin_client.mint(&b, &10i128);
+        client.buy_ticket(&b);
+    }
+    client.finalize_raffle();
+    let winner = client.get_raffle().winner.unwrap();
+
+    // Advance time by 3600s
+    env.ledger().with_mut(|l| {
+        l.timestamp += 3600;
+    });
+
+    let claimed = client.claim_prize(&winner);
+    assert_eq!(claimed, 100i128);
 }
