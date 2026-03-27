@@ -56,6 +56,8 @@ fn setup_raffle_env(
         oracle_address: oracle,
         protocol_fee_bp: fee_bp,
         treasury_address: treasury,
+        swap_router: None,
+        tikka_token: None,
     };
 
     client.init(&factory, &factory_admin, &creator, &config);
@@ -240,6 +242,8 @@ fn test_raffle_created_event() {
         oracle_address: None,
         protocol_fee_bp: 0,
         treasury_address: None,
+        swap_router: None,
+        tikka_token: None,
     };
 
     client.init(&factory, &factory_admin, &creator, &config);
