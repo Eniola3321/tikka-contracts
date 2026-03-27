@@ -166,6 +166,7 @@ pub enum Error {
     MultipleTicketsNotAllowed = 32,
     NoTicketsSold = 33,
     TicketNotFound = 34,
+    RaffleEnded = 35,
     
     // System errors (41-50)
     ArithmeticOverflow = 41,
@@ -195,7 +196,7 @@ fn require_not_paused(env: &Env) -> Result<(), Error> {
     Ok(())
 }
 
-fn read_tickets(env: &Env) -> Vec<Address> {
+fn read_tickets(env: &Env) -> Vec<Ticket> {
     env.storage()
         .instance()
         .get(&DataKey::Tickets)
@@ -236,13 +237,6 @@ fn write_ticket(env: &Env, ticket: &Ticket) {
         .set(&DataKey::Ticket(ticket.id), ticket);
 }
 
-fn require_not_paused(env: &Env) -> Result<(), Error> {
-    if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
-        return Err(Error::ContractPaused);
-    }
-    Ok(())
-}
-
 fn acquire_guard(env: &Env) -> Result<(), Error> {
     if env.storage().instance().has(&DataKey::ReentrancyGuard) {
         return Err(Error::Reentrancy);
@@ -255,13 +249,6 @@ fn acquire_guard(env: &Env) -> Result<(), Error> {
 
 fn release_guard(env: &Env) {
     env.storage().instance().remove(&DataKey::ReentrancyGuard);
-}
-
-fn require_not_paused(env: &Env) -> Result<(), Error> {
-    if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
-        return Err(Error::ContractPaused);
-    }
-    Ok(())
 }
 
 fn do_transfer(env: &Env, from: Address, to: Address, token_id: u32) -> Result<(), Error> {
@@ -574,8 +561,8 @@ impl Contract {
 
         for _ in 0..raffle.prizes.len() {
             let winner_index = (current_seed % tickets.len() as u64) as u32;
-            let winner = tickets.get(winner_index).expect("Ticket out of bounds");
-            winners.push_back(winner);
+            let winner_ticket = tickets.get(winner_index).expect("Ticket out of bounds");
+            winners.push_back(winner_ticket.owner);
             winning_ticket_ids.push_back(winner_index);
             // Change seed for the next winner
             current_seed = current_seed.wrapping_add(1);
@@ -641,10 +628,10 @@ impl Contract {
 
         for _ in 0..raffle.prizes.len() {
             let winner_index = (current_seed % tickets.len() as u64) as u32;
-            let winner = tickets
+            let winner_ticket = tickets
                 .get(winner_index)
                 .expect("Ticket out of bounds callback");
-            winners.push_back(winner);
+            winners.push_back(winner_ticket.owner);
             winning_ticket_ids.push_back(winner_index);
             // Change seed for the next winner
             current_seed = current_seed.wrapping_add(1);

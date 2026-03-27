@@ -25,6 +25,7 @@ pub enum DataKey {
     PendingAdmin,
     UniqueParticipant(Address),
     TotalUniqueParticipants,
+    CreatorVerification(Address),
 }
 
 #[contracterror]
@@ -117,6 +118,32 @@ impl RaffleFactory {
         Ok(())
     }
 
+    pub fn set_verified(env: Env, creator: Address, is_verified: bool) -> Result<(), ContractError> {
+        let admin = require_factory_admin(&env)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::CreatorVerification(creator.clone()), &is_verified);
+
+        publish_factory_event(
+            &env,
+            "creator_verified",
+            events::CreatorVerified {
+                creator,
+                is_verified,
+                admin,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn is_verified(env: Env, creator: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CreatorVerification(creator))
+            .unwrap_or(false)
+    }
+
     pub fn create_raffle(
         env: Env,
         creator: Address,
@@ -145,12 +172,17 @@ impl RaffleFactory {
             .unwrap();
 
         // Use parameters to avoid warnings
-        let mut final_config = config;
+        let mut final_config = config.clone();
         final_config.protocol_fee_bp = protocol_fee_bp;
         final_config.treasury_address = Some(treasury);
 
         let admin: Address = env.storage().persistent().get(&DataKey::Admin).unwrap();
         let factory_address = env.current_contract_address();
+        
+        // Salt for deployment
+         let salt = env.crypto().sha256(&(creator.clone(), config.description.clone()).to_xdr(&env));
+         let raffle_address = env.deployer().with_address(factory_address.clone(), salt).deploy(wasm_hash);
+
         let client = instance::ContractClient::new(&env, &raffle_address);
         client.init(&factory_address, &admin, &creator, &config);
 
