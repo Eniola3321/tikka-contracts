@@ -106,6 +106,8 @@ pub enum DataKey {
     Factory,
     RefundStatus(u32), // ticket_id -> bool
     ReentrancyGuard,
+    Admin,
+    Paused,
 }
 
 // --- Error Types ---
@@ -145,6 +147,13 @@ fn read_raffle(env: &Env) -> Result<Raffle, Error> {
 
 fn write_raffle(env: &Env, raffle: &Raffle) {
     env.storage().instance().set(&DataKey::Raffle, raffle);
+}
+
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    if Contract::is_paused(env.clone()) {
+        return Err(Error::ContractPaused);
+    }
+    Ok(())
 }
 
 fn read_tickets(env: &Env) -> Vec<Address> {
