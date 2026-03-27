@@ -85,6 +85,7 @@ fn test_basic_internal_raffle_flow() {
 
     let raffle = client.get_raffle();
     let winner = raffle.winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     let _claimed_amount = client.claim_prize(&winner);
 
     assert_eq!(token_client.balance(&winner), 100i128);
@@ -114,6 +115,7 @@ fn test_protocol_fees() {
 
     client.finalize_raffle();
     let winner = client.get_raffle().winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
 
     // Prize: 100, Fee: 5% = 5, Winner: 95
@@ -408,6 +410,7 @@ fn test_prize_claimed_event() {
 
     client.finalize_raffle();
     let winner = client.get_raffle().winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
 
     // Check that prize_claimed event was emitted
@@ -522,6 +525,7 @@ fn test_claim_prize_guard_released_after_success() {
     }
     client.finalize_raffle();
     let winner = client.get_raffle().winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
 
     // Guard must be released after successful claim
@@ -607,6 +611,7 @@ fn test_claim_prize_blocked_by_active_reentrancy_guard() {
             .set(&DataKey::ReentrancyGuard, &true);
     });
 
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner); // Must panic with Reentrancy
 }
 
@@ -655,6 +660,7 @@ fn test_claim_with_protocol_fee_guard_released() {
     client.finalize_raffle();
 
     let winner = client.get_raffle().winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     let claimed = client.claim_prize(&winner);
     assert_eq!(claimed, 95i128);
 
@@ -728,6 +734,7 @@ fn test_claim_prize_cei_status_transitions_to_claimed() {
     assert!(raffle_before.status == RaffleStatus::Finalized);
 
     let winner = raffle_before.winner.unwrap();
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
 
     let raffle_after = client.get_raffle();
@@ -751,6 +758,7 @@ fn test_double_claim_rejected_after_cei_state_transition() {
     client.finalize_raffle();
     let winner = client.get_raffle().winner.unwrap();
 
+    env.ledger().with_mut(|l| l.timestamp += 3600);
     client.claim_prize(&winner);
     client.claim_prize(&winner); // Must panic: status is Claimed, not Finalized
 }
@@ -773,4 +781,52 @@ fn test_cancel_raffle_cei_state_cancelled_before_refund() {
     assert!(raffle.status == RaffleStatus::Cancelled);
     assert!(!raffle.prize_deposited);
     assert_eq!(token_client.balance(&creator), 1000i128);
+}
+
+// --- 7. VERIFICATION DELAY TESTS ---
+
+#[test]
+#[should_panic] // Error(Contract, #22) - ClaimTooEarly
+fn test_claim_prize_rejected_too_early() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, admin_client, _, _) =
+        setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
+
+    client.deposit_prize();
+    for _ in 0..5 {
+        let b = Address::generate(&env);
+        admin_client.mint(&b, &10i128);
+        client.buy_ticket(&b);
+    }
+    client.finalize_raffle();
+    let winner = client.get_raffle().winner.unwrap();
+
+    // Attempt claim immediately -> panics with ClaimTooEarly
+    client.claim_prize(&winner);
+}
+
+#[test]
+fn test_claim_prize_accepted_after_one_hour() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, admin_client, _, _) =
+        setup_raffle_env(&env, RandomnessSource::Internal, None, 0, None);
+
+    client.deposit_prize();
+    for _ in 0..5 {
+        let b = Address::generate(&env);
+        admin_client.mint(&b, &10i128);
+        client.buy_ticket(&b);
+    }
+    client.finalize_raffle();
+    let winner = client.get_raffle().winner.unwrap();
+
+    // Advance time by 3600s
+    env.ledger().with_mut(|l| {
+        l.timestamp += 3600;
+    });
+
+    let claimed = client.claim_prize(&winner);
+    assert_eq!(claimed, 100i128);
 }

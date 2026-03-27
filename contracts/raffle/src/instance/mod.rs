@@ -57,6 +57,7 @@ pub struct Raffle {
     pub oracle_address: Option<Address>,
     pub protocol_fee_bp: u32,
     pub treasury_address: Option<Address>,
+    pub finalized_at: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -134,6 +135,7 @@ pub enum Error {
     NotInitialized = 19,
     InvalidStateTransition = 20,
     Reentrancy = 21,
+    ClaimTooEarly = 22,
 }
 
 fn read_raffle(env: &Env) -> Result<Raffle, Error> {
@@ -251,6 +253,7 @@ impl Contract {
             oracle_address: config.oracle_address,
             protocol_fee_bp: config.protocol_fee_bp,
             treasury_address: config.treasury_address,
+            finalized_at: None,
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
@@ -460,6 +463,7 @@ impl Contract {
 
         raffle.status = RaffleStatus::Finalized;
         raffle.winner = Some(winner.clone());
+        raffle.finalized_at = Some(env.ledger().timestamp());
         write_raffle(&env, &raffle);
 
         publish_event(
@@ -511,6 +515,7 @@ impl Contract {
 
         raffle.status = RaffleStatus::Finalized;
         raffle.winner = Some(winner.clone());
+        raffle.finalized_at = Some(env.ledger().timestamp());
         write_raffle(&env, &raffle);
 
         publish_event(
@@ -561,6 +566,10 @@ impl Contract {
         }
         if !raffle.prize_deposited {
             return Err(Error::PrizeNotDeposited);
+        }
+
+        if env.ledger().timestamp() < raffle.finalized_at.unwrap_or(0) + 3600 {
+            return Err(Error::ClaimTooEarly);
         }
 
         // Reentrancy guard
