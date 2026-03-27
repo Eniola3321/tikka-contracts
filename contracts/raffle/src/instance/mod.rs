@@ -155,14 +155,14 @@ fn write_raffle(env: &Env, raffle: &Raffle) {
     env.storage().instance().set(&DataKey::Raffle, raffle);
 }
 
-fn read_tickets(env: &Env) -> Vec<Address> {
+fn read_tickets(env: &Env) -> Vec<Ticket> {
     env.storage()
         .instance()
         .get(&DataKey::Tickets)
         .unwrap_or_else(|| Vec::new(env))
 }
 
-fn write_tickets(env: &Env, tickets: &Vec<Address>) {
+fn write_tickets(env: &Env, tickets: &Vec<Ticket>) {
     env.storage().instance().set(&DataKey::Tickets, tickets);
 }
 
@@ -236,7 +236,9 @@ fn do_transfer(env: &Env, from: Address, to: Address, token_id: u32) -> Result<(
 
     let mut all_tickets = read_tickets(env);
     let index = ticket.ticket_number.saturating_sub(1) as u32;
-    all_tickets.set(index, to.clone());
+    let mut old_ticket = all_tickets.get(index).unwrap();
+    old_ticket.owner = to.clone();
+    all_tickets.set(index, old_ticket);
     write_tickets(env, &all_tickets);
 
     env.storage().persistent().remove(&DataKey::Approved(token_id));
@@ -396,7 +398,7 @@ impl Contract {
         write_ticket(&env, &ticket);
 
         let mut tickets = read_tickets(&env);
-        tickets.push_back(buyer.clone());
+        tickets.push_back(ticket);
         write_tickets(&env, &tickets);
 
         raffle.tickets_sold += 1;
@@ -499,7 +501,8 @@ impl Contract {
         let tickets = read_tickets(&env);
         let seed = env.ledger().timestamp() + env.ledger().sequence() as u64;
         let winner_index = (seed % tickets.len() as u64) as u32;
-        let winner = tickets.get(winner_index).expect("Ticket out of bounds");
+        let winner_ticket = tickets.get(winner_index).expect("Ticket out of bounds");
+        let winner = winner_ticket.owner.clone();
 
         raffle.status = RaffleStatus::Finalized;
         raffle.winner = Some(winner.clone());
@@ -549,9 +552,11 @@ impl Contract {
             return Err(Error::NoTicketsSold);
         }
         let winner_index = (random_seed % tickets.len() as u64) as u32;
-        let winner = tickets
+        let winner_ticket = tickets
             .get(winner_index)
             .expect("Ticket out of bounds callback");
+        let winner = winner_ticket.owner.clone();
+        let winning_ticket_id = winner_ticket.id;
 
         raffle.status = RaffleStatus::Finalized;
         raffle.winner = Some(winner.clone());
@@ -573,7 +578,7 @@ impl Contract {
             "raffle_finalized",
             RaffleFinalized {
                 winner: winner.clone(),
-                winning_ticket_id: winner_index,
+                winning_ticket_id,
                 total_tickets_sold: raffle.tickets_sold,
                 randomness_source: RandomnessSource::External,
                 finalized_at: env.ledger().timestamp(),
@@ -922,6 +927,31 @@ impl Contract {
 
     pub fn get_raffle(env: Env) -> Result<Raffle, Error> {
         read_raffle(&env)
+    }
+
+    /// Get all tickets or a paginated subset
+    /// Returns tickets from start index for count number of tickets
+    pub fn get_tickets(env: Env, start: u32, count: u32) -> Vec<Ticket> {
+        let all_tickets = read_tickets(&env);
+        let total = all_tickets.len();
+        
+        if start >= total {
+            return Vec::new(&env);
+        }
+        
+        let end = if start + count > total { total } else { start + count };
+        let mut result = Vec::new(&env);
+        
+        for i in start..end {
+            result.push_back(all_tickets.get(i).unwrap());
+        }
+        
+        result
+    }
+
+    /// Get total ticket count
+    pub fn get_ticket_count(env: Env) -> u32 {
+        read_tickets(&env).len()
     }
 
     pub fn pause(env: Env) -> Result<(), Error> {
