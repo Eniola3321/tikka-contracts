@@ -1,6 +1,7 @@
 // Instance submodule
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, Env, IntoVal, String,
+    Symbol, Vec,
 };
 
 use crate::types::{effective_limit, PageResult_Tickets, PaginationParams};
@@ -10,9 +11,15 @@ use crate::events::{
     RandomnessReceived, RandomnessRequested, StatusChanged, TicketPurchased,
 };
 
+
+// Define a trait for Soroswap Router
+#[soroban_sdk::contractclient(name = "SoroswapRouterClient")]
+pub trait SoroswapRouter {
+
 // --- External Contract Traits ---
 #[soroban_sdk::contractclient(name = "SoroswapRouterClient")]
 pub trait SoroswapRouterTrait {
+
     fn swap_exact_tokens_for_tokens(
         env: Env,
         amount_in: i128,
@@ -77,6 +84,9 @@ pub struct Raffle {
     pub swap_router: Option<Address>,
     pub tikka_token: Option<Address>,
     pub finalized_at: Option<u64>,
+    pub swap_router: Option<Address>,
+    pub tikka_token: Option<Address>,
+    pub winner_ticket_id: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -259,7 +269,16 @@ fn release_guard(env: &Env) {
 }
 
 fn require_not_paused(env: &Env) -> Result<(), Error> {
+
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+
     if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+
         return Err(Error::ContractPaused);
     }
     Ok(())
@@ -365,6 +384,9 @@ impl Contract {
             swap_router: config.swap_router,
             tikka_token: config.tikka_token,
             finalized_at: None,
+            swap_router: config.swap_router,
+            tikka_token: config.tikka_token,
+            winner_ticket_id: None,
         };
         write_raffle(&env, &raffle);
         env.storage().instance().set(&DataKey::Factory, &factory);
@@ -488,6 +510,15 @@ impl Contract {
 
         write_ticket_count(&env, &buyer, current_count + 1);
         write_raffle(&env, &raffle);
+
+        // Update global volume in factory
+        if let Some(factory_address) = env.storage().instance().get::<_, Address>(&DataKey::Factory) {
+            env.invoke_contract::<()>(
+                &factory_address,
+                &Symbol::new(&env, "record_volume"),
+                (raffle.payment_token.clone(), raffle.ticket_price).into_val(&env),
+            );
+        }
 
         // Interaction: external token transfer
         let token_client = token::Client::new(&env, &raffle.payment_token);
