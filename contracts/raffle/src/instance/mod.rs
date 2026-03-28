@@ -8,7 +8,7 @@ use crate::types::{effective_limit, PageResult_Tickets, PaginationParams};
 
 use crate::events::{
     DrawTriggered, PrizeClaimed, PrizeDeposited, RaffleCancelled, RaffleCreated, RaffleFinalized,
-    RandomnessReceived, RandomnessRequested, StatusChanged, TicketPurchased,
+    RandomnessReceived, RandomnessRequested, RandomnessType, StatusChanged, TicketPurchased,
 };
 
 
@@ -632,6 +632,7 @@ impl Contract {
                 winning_ticket_ids,
                 total_tickets_sold: raffle.tickets_sold,
                 randomness_source: RandomnessSource::Internal,
+                randomness_type: RandomnessType::Prng,
                 finalized_at: env.ledger().timestamp(),
             },
         );
@@ -711,6 +712,7 @@ impl Contract {
                 winning_ticket_ids,
                 total_tickets_sold: raffle.tickets_sold,
                 randomness_source: RandomnessSource::External,
+                randomness_type: RandomnessType::Vrf,
                 finalized_at: env.ledger().timestamp(),
             },
         );
